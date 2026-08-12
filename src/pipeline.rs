@@ -1,7 +1,10 @@
 //! 検証パイプライン駆動。候補を一時 Cargo プロジェクトへ展開し、
 //! compile → test → 採点 までを実行する。
 
-use crate::analysis::{count_eslint_findings, count_go_vet_findings, count_lint_warnings, count_ruff_findings, count_staticcheck_findings, has_bench, SourceMetrics};
+use crate::analysis::{
+    count_eslint_findings, count_go_vet_findings, count_lint_warnings, count_ruff_findings,
+    count_staticcheck_findings, has_bench, SourceMetrics,
+};
 use crate::config::Rubric;
 use crate::model::{Candidate, Evaluation, Language, StageOutcome};
 use crate::{runner, scoring, wasm};
@@ -309,8 +312,7 @@ fn run_rust_stages(
         fs::create_dir_all(root.join("benches")).context("benches ディレクトリの作成に失敗")?;
         fs::write(root.join("benches").join("bench.rs"), &candidate.source)
             .context("ベンチソースの書込に失敗")?;
-        fs::write(root.join("src").join("lib.rs"), "")
-            .context("空 lib.rs の書込に失敗")?;
+        fs::write(root.join("src").join("lib.rs"), "").context("空 lib.rs の書込に失敗")?;
     } else {
         fs::write(root.join("src").join("lib.rs"), &candidate.source)
             .context("候補ソースの書込に失敗")?;
@@ -611,9 +613,7 @@ fn run_go_stages(
         (outcome, count_staticcheck_findings(&out))
     } else {
         let mut l = Command::new("sh");
-        l.arg("-c")
-            .arg("go vet ./... 1>&2; true")
-            .current_dir(root);
+        l.arg("-c").arg("go vet ./... 1>&2; true").current_dir(root);
         let (outcome, out) = runner::run_stage_capture("go-vet", l, timeout);
         (outcome, count_go_vet_findings(&out))
     };
@@ -889,5 +889,54 @@ criterion_group!(benches, bench);
 criterion_main!(benches);"#;
         assert!(has_bench(src));
         assert!(!has_bench("fn regular() {}"));
+    }
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+
+    #[test]
+    fn parse_gremlins_json_typical() {
+        let json = r#"{"mutants_killed":8,"mutants_total":10,"elapsed_ns":12345}"#;
+        assert_eq!(parse_gremlins_json(json), Some((8, 10)));
+    }
+
+    #[test]
+    fn parse_gremlins_json_all_killed() {
+        let json = r#"{"mutants_killed":5,"mutants_total":5}"#;
+        assert_eq!(parse_gremlins_json(json), Some((5, 5)));
+    }
+
+    #[test]
+    fn parse_gremlins_json_zero_mutants() {
+        let json = r#"{"mutants_killed":0,"mutants_total":0}"#;
+        assert_eq!(parse_gremlins_json(json), Some((0, 0)));
+    }
+
+    #[test]
+    fn parse_gremlins_json_invalid_returns_none() {
+        assert_eq!(parse_gremlins_json(""), None);
+        assert_eq!(parse_gremlins_json("not json"), None);
+        assert_eq!(parse_gremlins_json(r#"{"other":"field"}"#), None);
+    }
+
+    #[test]
+    fn parse_mutmut_json_typical() {
+        let output = "some log\n{\"total_mutants\":6,\"caught\":4}\n";
+        assert_eq!(parse_mutmut_json(output), Some((4, 6)));
+    }
+
+    #[test]
+    fn parse_mutmut_json_picks_last_json_line() {
+        // mutmut が途中に別の JSON を出しても末尾（最新）を使う。
+        let output = "{\"total_mutants\":3,\"caught\":1}\n{\"total_mutants\":6,\"caught\":4}\n";
+        assert_eq!(parse_mutmut_json(output), Some((4, 6)));
+    }
+
+    #[test]
+    fn parse_mutmut_json_no_json_returns_none() {
+        assert_eq!(parse_mutmut_json(""), None);
+        assert_eq!(parse_mutmut_json("just plain text\n"), None);
     }
 }
