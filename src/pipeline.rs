@@ -170,6 +170,7 @@ struct StageResults {
     mutation: StageOutcome,
     mutation_caught: usize,
     mutation_total: usize,
+    audit_findings: usize,
 }
 
 impl StageResults {
@@ -186,6 +187,7 @@ impl StageResults {
             mutation: StageOutcome::Skipped,
             mutation_caught: 0,
             mutation_total: 0,
+            audit_findings: 0,
         }
     }
 }
@@ -241,6 +243,7 @@ fn assemble(candidate: &Candidate, r: StageResults, rubric: &Rubric) -> Evaluati
         rubric,
         r.mutation_caught,
         r.mutation_total,
+        r.audit_findings,
     );
     let score = axes.total();
     Evaluation {
@@ -255,6 +258,7 @@ fn assemble(candidate: &Candidate, r: StageResults, rubric: &Rubric) -> Evaluati
         mutation: r.mutation,
         mutation_caught: r.mutation_caught,
         mutation_total: r.mutation_total,
+        audit_findings: r.audit_findings,
         axes,
         score,
     }
@@ -320,6 +324,8 @@ fn run_rust_stages(
         (StageOutcome::Skipped, 0, 0)
     };
 
+    let audit_findings = run_cargo_audit(root, timeout);
+
     Ok(StageResults {
         compile,
         test,
@@ -331,6 +337,7 @@ fn run_rust_stages(
         mutation,
         mutation_caught,
         mutation_total,
+        audit_findings,
     })
 }
 
@@ -458,6 +465,7 @@ fn run_python_stages(
         mutation,
         mutation_caught,
         mutation_total,
+        audit_findings: 0,
     })
 }
 
@@ -588,6 +596,7 @@ fn run_go_stages(
         mutation,
         mutation_caught,
         mutation_total,
+        audit_findings: 0,
     })
 }
 
@@ -697,5 +706,51 @@ fn run_js_stages(
         mutation: StageOutcome::Skipped,
         mutation_caught: 0,
         mutation_total: 0,
+        audit_findings: 0,
     })
+}
+
+/// `cargo audit --json` で Rust 候補の脆弱性をスキャンし、検出件数を返す。
+///
+/// - `cargo audit` が PATH にない場合や `Cargo.lock` が存在しない場合は 0 を返す（減点なし）。
+fn run_cargo_audit(root: &Path, timeout: Duration) -> usize {
+    let audit_available = std::process::Command::new("cargo")
+        .args(["audit", "--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !audit_available {
+        return 0;
+    }
+    if !root.join("Cargo.lock").exists() {
+        return 0;
+    }
+
+    let mut cmd = Command::new("cargo");
+    cmd.args(["audit", "--json"]).current_dir(root);
+    let (_outcome, stdout) = runner::run_stage_capture("audit", cmd, timeout);
+    parse_audit_json(&stdout).unwrap_or(0)
+}
+
+/// `cargo audit --json` の出力から脆弱性件数を取り出す。
+fn parse_audit_json(stdout: &str) -> Option<usize> {
+    #[derive(serde::Deserialize)]
+    struct Vulnerabilities {
+        count: usize,
+    }
+    #[derive(serde::Deserialize)]
+    struct AuditOutput {
+        vulnerabilities: Vulnerabilities,
+    }
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.starts_with('{') {
+            if let Ok(a) = serde_json::from_str::<AuditOutput>(line) {
+                return Some(a.vulnerabilities.count);
+            }
+        }
+    }
+    None
 }
