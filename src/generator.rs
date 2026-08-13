@@ -65,9 +65,13 @@ pub fn parse_candidates(output: &str) -> Vec<String> {
 /// 生成に失敗した場合や候補数が足りない場合でも取得できた分を返す。
 pub fn generate(spec: &str, n: usize, llm_timeout: std::time::Duration) -> Vec<String> {
     let prompt = build_generate_prompt(spec, n);
-    let raw = match crate::llm_client::backend().as_str() {
-        "ollama" => crate::llm_client::post_ollama(&prompt, false, llm_timeout),
-        _ => crate::llm_client::post_claude(&prompt, 4096, llm_timeout),
+    let raw = match crate::llm_client::BackendKind::from_env() {
+        crate::llm_client::BackendKind::Ollama => {
+            crate::llm_client::post_ollama_text(&prompt, llm_timeout)
+        }
+        crate::llm_client::BackendKind::Claude => {
+            crate::llm_client::post_claude(&prompt, 4096, llm_timeout)
+        }
     };
     match raw {
         Some(text) => parse_candidates(&text).into_iter().take(n).collect(),

@@ -74,9 +74,13 @@ fn parse_review(text: &str) -> Option<LlmReview> {
 /// LLM が利用不能・タイムアウト・パース失敗のときは `None`（採点影響なし）。
 pub fn review(source: &str, test_passed: bool) -> Option<LlmReview> {
     let prompt = build_prompt(source, test_passed);
-    let text = match llm_client::backend().as_str() {
-        "ollama" => llm_client::post_ollama(&prompt, true, std::time::Duration::from_secs(60))?,
-        _ => llm_client::post_claude(&prompt, 256, std::time::Duration::from_secs(30))?,
+    let text = match llm_client::BackendKind::from_env() {
+        llm_client::BackendKind::Ollama => {
+            llm_client::post_ollama_json(&prompt, std::time::Duration::from_secs(60))?
+        }
+        llm_client::BackendKind::Claude => {
+            llm_client::post_claude(&prompt, 256, std::time::Duration::from_secs(30))?
+        }
     };
     parse_review(&text)
 }
